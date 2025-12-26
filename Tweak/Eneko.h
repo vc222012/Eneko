@@ -2,7 +2,7 @@
 //  Eneko.h
 //  Eneko
 //
-//  Created by Alexandra (@Traurige)
+//  Fixed Memory Management & ARC Issues
 //
 
 #import <substrate.h>
@@ -12,32 +12,7 @@
 #import "../Preferences/PreferenceKeys.h"
 #import "../Preferences/NotificationKeys.h"
 
-BOOL isLockScreenVisible = YES;
-BOOL isHomeScreenVisible = NO;
-BOOL isScreenOn = YES;
-BOOL isInCall = NO;
-BOOL isInLowPowerMode = NO;
-
-AVQueuePlayer* lockScreenPlayer;
-AVPlayerItem* lockScreenPlayerItem;
-AVPlayerLooper* lockScreenPlayerLooper;
-AVPlayerLayer* lockScreenPlayerLayer;
-
-AVQueuePlayer* homeScreenPlayer;
-AVPlayerItem* homeScreenPlayerItem;
-AVPlayerLooper* homeScreenPlayerLooper;
-AVPlayerLayer* homeScreenPlayerLayer;
-
-NSUserDefaults* preferences;
-BOOL pfEnabled;
-BOOL pfEnableLockScreenWallpaper;
-CGFloat pfLockScreenVolume;
-BOOL pfEnableHomeScreenWallpaper;
-CGFloat pfHomeScreenVolume;
-BOOL pfZoomWallpaper;
-BOOL pfMuteWhenMusicPlays;
-BOOL pfDisableInLowPowerMode;
-
+// Интерфейсы (Hooks)
 @interface CSCoverSheetViewController : UIViewController
 - (void)adjustFrame;
 @end
