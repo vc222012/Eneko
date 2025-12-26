@@ -1,11 +1,48 @@
 //
-//  Eneko.m
+//  Eneko.m / Tweak.x
 //  Eneko
 //
 //  Created by Alexandra (@Traurige)
+//  Fixed by Your Thought Partner (Gemini)
 //
 
 #import "Eneko.h"
+
+// ============================================================================
+// FIX: Используем static __strong переменные.
+// Это гарантирует, что ARC (сборщик мусора) не удалит плеер раньше времени.
+// ============================================================================
+
+// State flags
+static BOOL isLockScreenVisible = YES;
+static BOOL isHomeScreenVisible = NO;
+static BOOL isScreenOn = YES;
+static BOOL isInCall = NO;
+static BOOL isInLowPowerMode = NO;
+
+// Lock Screen Player Objects
+static __strong AVQueuePlayer* lockScreenPlayer = nil;
+static __strong AVPlayerItem* lockScreenPlayerItem = nil;
+static __strong AVPlayerLooper* lockScreenPlayerLooper = nil;
+static __strong AVPlayerLayer* lockScreenPlayerLayer = nil;
+
+// Home Screen Player Objects
+static __strong AVQueuePlayer* homeScreenPlayer = nil;
+static __strong AVPlayerItem* homeScreenPlayerItem = nil;
+static __strong AVPlayerLooper* homeScreenPlayerLooper = nil;
+static __strong AVPlayerLayer* homeScreenPlayerLayer = nil;
+
+// Preferences
+static NSUserDefaults* preferences;
+static BOOL pfEnabled;
+static BOOL pfEnableLockScreenWallpaper;
+static CGFloat pfLockScreenVolume;
+static BOOL pfEnableHomeScreenWallpaper;
+static CGFloat pfHomeScreenVolume;
+static BOOL pfZoomWallpaper;
+static BOOL pfMuteWhenMusicPlays;
+static BOOL pfDisableInLowPowerMode;
+
 
 #pragma mark - Lock screen class hooks
 
@@ -13,15 +50,32 @@ static void (* orig_CSCoverSheetViewController_viewDidLoad)(CSCoverSheetViewCont
 static void override_CSCoverSheetViewController_viewDidLoad(CSCoverSheetViewController* self, SEL _cmd) {
     orig_CSCoverSheetViewController_viewDidLoad(self, _cmd);
 
-    // player
+    // --- FIX START: Очистка старых объектов перед созданием новых ---
+    if (lockScreenPlayer) {
+        [lockScreenPlayer pause];
+        [lockScreenPlayer removeAllItems];
+    }
+    // Обнуляем явно, чтобы ARC освободил память
+    lockScreenPlayer = nil;
+    lockScreenPlayerItem = nil;
+    lockScreenPlayerLooper = nil;
+    
+    if (lockScreenPlayerLayer) {
+        [lockScreenPlayerLayer removeFromSuperlayer];
+        lockScreenPlayerLayer = nil;
+    }
+    // --- FIX END ---
+
+    // Получаем URL видео
     NSURL* url = [GcImagePickerUtils videoURLFromDefaults:kPreferencesIdentifier withKey:kPreferenceKeyLockScreenWallpaper];
     if (!url) {
         return;
     }
 
-    lockScreenPlayerItem = [AVPlayerItem playerItemWithURL:url];
+    // --- FIX START: Надежная инициализация (alloc init) ---
+    lockScreenPlayerItem = [[AVPlayerItem alloc] initWithURL:url];
 
-    lockScreenPlayer = [AVQueuePlayer playerWithPlayerItem:lockScreenPlayerItem];
+    lockScreenPlayer = [[AVQueuePlayer alloc] initWithPlayerItem:lockScreenPlayerItem];
     [lockScreenPlayer setPreventsDisplaySleepDuringVideoPlayback:NO];
 
     if (pfLockScreenVolume == 0) {
@@ -30,20 +84,29 @@ static void override_CSCoverSheetViewController_viewDidLoad(CSCoverSheetViewCont
         [lockScreenPlayer setVolume:pfLockScreenVolume];
     }
 
-    lockScreenPlayerLooper = [AVPlayerLooper playerLooperWithPlayer:lockScreenPlayer templateItem:lockScreenPlayerItem];
+    // Создаем Looper и присваиваем его static переменной (чтобы не исчезал)
+    lockScreenPlayerLooper = [[AVPlayerLooper alloc] initWithPlayer:lockScreenPlayer templateItem:lockScreenPlayerItem];
 
     lockScreenPlayerLayer = [AVPlayerLayer playerLayerWithPlayer:lockScreenPlayer];
     [lockScreenPlayerLayer setVideoGravity:AVLayerVideoGravityResizeAspectFill];
     [lockScreenPlayerLayer setFrame:[[[self view] layer] bounds]];
+    lockScreenPlayerLayer.opacity = 1.0; // Сразу показываем
+    
     [[[self view] layer] insertSublayer:lockScreenPlayerLayer atIndex:0];
 
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryAmbient error:nil];
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(adjustFrame) name:@"enekoScreenRotated" object:nil];
+    
+    // Запускаем сразу
+    [lockScreenPlayer play];
 }
 
 static void CSCoverSheetViewController_adjustFrame(CSCoverSheetViewController* self, SEL _cmd) {
-    [lockScreenPlayerLayer setFrame:[[[self view] layer] bounds]];
+    if (lockScreenPlayerLayer) {
+        [lockScreenPlayerLayer setFrame:[[[self view] layer] bounds]];
+    }
 }
 
 #pragma mark - Home screen class hooks
@@ -52,15 +115,30 @@ static void (* orig_SBIconController_viewDidLoad)(SBIconController* self, SEL _c
 static void override_SBIconController_viewDidLoad(SBIconController* self, SEL _cmd) {
     orig_SBIconController_viewDidLoad(self, _cmd);
 
-    // player
+    // --- FIX START: Очистка памяти для Home Screen ---
+    if (homeScreenPlayer) {
+        [homeScreenPlayer pause];
+        [homeScreenPlayer removeAllItems];
+    }
+    homeScreenPlayer = nil;
+    homeScreenPlayerItem = nil;
+    homeScreenPlayerLooper = nil;
+    
+    if (homeScreenPlayerLayer) {
+        [homeScreenPlayerLayer removeFromSuperlayer];
+        homeScreenPlayerLayer = nil;
+    }
+    // --- FIX END ---
+
     NSURL* url = [GcImagePickerUtils videoURLFromDefaults:kPreferencesIdentifier withKey:kPreferenceKeyHomeScreenWallpaper];
     if (!url) {
         return;
     }
 
-    homeScreenPlayerItem = [AVPlayerItem playerItemWithURL:url];
+    // --- FIX START: Надежная инициализация ---
+    homeScreenPlayerItem = [[AVPlayerItem alloc] initWithURL:url];
 
-    homeScreenPlayer = [AVQueuePlayer playerWithPlayerItem:homeScreenPlayerItem];
+    homeScreenPlayer = [[AVQueuePlayer alloc] initWithPlayerItem:homeScreenPlayerItem];
     [homeScreenPlayer setPreventsDisplaySleepDuringVideoPlayback:NO];
 
     if (pfHomeScreenVolume == 0) {
@@ -69,7 +147,7 @@ static void override_SBIconController_viewDidLoad(SBIconController* self, SEL _c
         [homeScreenPlayer setVolume:pfHomeScreenVolume];
     }
 
-    homeScreenPlayerLooper = [AVPlayerLooper playerLooperWithPlayer:homeScreenPlayer templateItem:homeScreenPlayerItem];
+    homeScreenPlayerLooper = [[AVPlayerLooper alloc] initWithPlayer:homeScreenPlayer templateItem:homeScreenPlayerItem];
 
     homeScreenPlayerLayer = [AVPlayerLayer playerLayerWithPlayer:homeScreenPlayer];
     [homeScreenPlayerLayer setVideoGravity:AVLayerVideoGravityResizeAspectFill];
@@ -78,24 +156,36 @@ static void override_SBIconController_viewDidLoad(SBIconController* self, SEL _c
     if (pfZoomWallpaper) {
         [homeScreenPlayerLayer setTransform:CATransform3DMakeScale(1.15, 1.15, 2)];
     }
+    
+    homeScreenPlayerLayer.opacity = 1.0;
 
     [[[self view] layer] insertSublayer:homeScreenPlayerLayer atIndex:0];
 
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryAmbient error:nil];
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(adjustFrame) name:@"enekoScreenRotated" object:nil];
+    
+    // Если мы уже на домашнем экране (например после респринга), запускаем
+    if (isHomeScreenVisible && !isLockScreenVisible) {
+        [homeScreenPlayer play];
+    }
 }
 
 static void SBIconController_adjustFrame(SBIconController* self, SEL _cmd) {
-    [homeScreenPlayerLayer setFrame:[[[self view] layer] bounds]];
+    if (homeScreenPlayerLayer) {
+        [homeScreenPlayerLayer setFrame:[[[self view] layer] bounds]];
+    }
 }
 
-#pragma mark - Manangement class hooks
+#pragma mark - Management Helper Functions
 
 void fadePlayer(AVPlayerLayer *playerLayer, float opacity, NSTimeInterval duration);
 void fadePlayer(AVPlayerLayer *playerLayer, float opacity, NSTimeInterval duration) {
+    if(!playerLayer) return;
+    
     if(playerLayer.opacity != opacity) {
-        if (playerLayer.animationKeys.count > 0) {
+        if (playerLayer.animationKeys.count > 0 && playerLayer.presentationLayer) {
             playerLayer.opacity = [playerLayer.presentationLayer opacity];
         }
         [CATransaction begin];
@@ -107,21 +197,21 @@ void fadePlayer(AVPlayerLayer *playerLayer, float opacity, NSTimeInterval durati
 
 void playVideo(AVPlayerLayer *playerLayer);
 void playVideo(AVPlayerLayer *playerLayer) {
-    if(!playerLayer) return;
+    if(!playerLayer || !playerLayer.player) return;
 
     fadePlayer(playerLayer, 1.0, 0.2);
-    AVPlayer *player = playerLayer.player;
-    [player play];
+    [playerLayer.player play];
 }
 
 void pauseVideo(AVPlayerLayer *playerLayer);
 void pauseVideo(AVPlayerLayer *playerLayer) {
-    if(!playerLayer) return;
+    if(!playerLayer || !playerLayer.player) return;
 
     fadePlayer(playerLayer, 0.0, 0.2);
-    AVPlayer *player = playerLayer.player;
-    [player pause];
+    [playerLayer.player pause];
 }
+
+#pragma mark - Visibility & Lifecycle Hooks
 
 static void (* orig_CSCoverSheetViewController_viewWillAppear)(CSCoverSheetViewController* self, SEL _cmd, BOOL animated);
 static void override_CSCoverSheetViewController_viewWillAppear(CSCoverSheetViewController* self, SEL _cmd, BOOL animated) {
@@ -244,7 +334,7 @@ static void override_SBBacklightController_turnOnScreenFullyWithBacklightSource(
     }
 
     isScreenOn = YES;
-    isLockScreenVisible = YES;
+    isLockScreenVisible = YES; // Usually when screen turns on, we are at lockscreen
 
     if ((pfDisableInLowPowerMode && isInLowPowerMode) || isInCall) {
         return;
@@ -320,6 +410,7 @@ static int override_TUCall_status(TUCall* self, SEL _cmd) {
 
     int orig = orig_TUCall_status(self, _cmd);
 
+    // Call status 6 usually means "disconnected" or "idle"
     if (orig != 6) {
         isInCall = YES;
 
@@ -337,7 +428,6 @@ static int override_TUCall_status(TUCall* self, SEL _cmd) {
             if (lockScreenPlayer) {
                 playVideo(lockScreenPlayerLayer);
             }
-
             if (homeScreenPlayer) {
                 [homeScreenPlayer pause];
             }
@@ -345,7 +435,6 @@ static int override_TUCall_status(TUCall* self, SEL _cmd) {
             if (homeScreenPlayer) {
                 [homeScreenPlayer play];
             }
-
             if (lockScreenPlayer) {
                 pauseVideo(lockScreenPlayerLayer);
             }
@@ -557,3 +646,4 @@ __attribute((constructor)) static void initialize() {
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)load_preferences, (CFStringRef)kNotificationKeyPreferencesReload, NULL, (CFNotificationSuspensionBehavior)kNilOptions);
 }
+
